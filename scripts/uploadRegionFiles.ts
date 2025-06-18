@@ -14,7 +14,7 @@ if (!TAG) {
   process.exit(1);
 }
 
-const FILES = ["regions.sqlite.gz", "names.json.gz"];
+const FILES = ["regions.sqlite.gz", "region-names.json.gz"];
 
 const BUILD_DIR = path.resolve("build");
 
@@ -57,17 +57,36 @@ async function uploadAssets() {
     const stream = createReadStream(fullPath);
 
     console.log(`📤 Uploading ${filename}...`);
+    // Check for existing asset
+    const existingAssets = await octokit.repos.listReleaseAssets({
+      owner,
+      repo,
+      release_id: release.data.id,
+    });
+
+    const existing = existingAssets.data.find((a) => a.name === filename);
+    if (existing) {
+      console.log(`🗑️ Deleting existing asset: ${filename}`);
+      await octokit.repos.deleteReleaseAsset({
+        owner,
+        repo,
+        asset_id: existing.id,
+      });
+    }
+
+    // Upload new asset
     await octokit.repos.uploadReleaseAsset({
       owner,
       repo,
       release_id: release.data.id,
       name: filename,
-      data: stream as unknown as string, // TS type limitation
+      data: stream as unknown as string,
       headers: {
         "content-type": "application/gzip",
         "content-length": stat.size,
       },
     });
+
     console.log(`✅ Uploaded ${filename}`);
   }
 }
