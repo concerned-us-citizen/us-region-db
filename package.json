@@ -1,0 +1,21 @@
+{
+  "name": "us-region-db",
+  "version": "1.0.0",
+  "description": "Creates sqlite and json files of US regions",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@octokit/rest": "^22.0.0",
+    "better-sqlite3": "^11.10.0",
+    "dotenv": "^16.5.0",
+    "shapefile": "^0.6.6",
+    "unzipper": "^0.12.3"
+  },
+  "devDependencies": {
+    "tsx": "^4.20.3"
+  }
+}
