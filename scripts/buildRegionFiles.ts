@@ -68,23 +68,35 @@ export const stateNameForAbbreviation: Record<string, string> = {
 const shapefiles = [
   {
     type: "zip",
+    addPolygons: false,
     file: "cb_2020_us_zcta520_500k.shp",
     zip: "cb_2020_us_zcta520_500k.zip",
     getName: (props: any) => props.ZCTA5CE20,
   },
   {
     type: "city",
+    addPolygons: false,
     file: "cb_2020_us_place_500k.shp",
     zip: "cb_2020_us_place_500k.zip",
     getName: (props: any) => props.NAME + ", " + props.STUSPS,
   },
   {
     type: "state",
+    addPolygons: true,
     file: "cb_2020_us_state_500k.shp",
     zip: "cb_2020_us_state_500k.zip",
     getName: (props: any) => props.STUSPS,
   },
-];
+  {
+    type: "metro",
+    addPolygons: true,
+    file: "cb_2020_us_cbsa_500k.shp",
+    zip: "cb_2020_us_cbsa_500k.zip",
+    getName: (props: any) => props.NAME,
+  },
+] as const;
+
+type ShapeType = (typeof shapefiles)[number]["type"];
 
 interface RegionRow {
   id: number;
@@ -132,6 +144,9 @@ export async function buildRegionDatabase() {
   await fs.mkdir(path.dirname(dbPath), { recursive: true });
   await fs.mkdir(buildDir, { recursive: true });
 
+  await fs.rm(dbPath, { force: true });
+  await fs.rm(jsonPath, { force: true });
+
   const db = new Database(dbPath);
 
   db.exec(`
@@ -147,8 +162,8 @@ export async function buildRegionDatabase() {
     );
     CREATE INDEX idx_region_name ON region_bounds(name);
 
-    DROP TABLE IF EXISTS state_regions;
-    CREATE TABLE state_regions (
+    DROP TABLE IF EXISTS polygon_regions;
+    CREATE TABLE polygon_regions (
       region_id INTEGER PRIMARY KEY,
       polygon_geojson TEXT NOT NULL,
       FOREIGN KEY(region_id) REFERENCES region_bounds(id)
@@ -160,10 +175,10 @@ export async function buildRegionDatabase() {
      VALUES (?, ?, ?, ?, ?, ?, ?)`
   );
 
-  const fuseIndex: { id: number; name: string; type: string }[] = [];
+  const fuseIndex: { id: number; name: string; type: ShapeType }[] = [];
   let id = 1;
 
-  for (const { type, file, zip, getName } of shapefiles) {
+  for (const { type, file, zip, addPolygons, getName } of shapefiles) {
     const filePath = path.join(buildDir, file);
     if (!existsSync(filePath)) {
       await downloadAndExtract(zip, buildDir);
@@ -173,7 +188,7 @@ export async function buildRegionDatabase() {
     let count = 0;
     while (true) {
       if (count++ % 10 === 0) {
-        console.log(`Processing ${count}`);
+        console.log(`Processing ${type} ${count}`);
       }
       const result = await source.read();
       if (result.done) break;
@@ -183,6 +198,9 @@ export async function buildRegionDatabase() {
         (geometry.type !== "Polygon" && geometry.type !== "MultiPolygon")
       )
         continue;
+
+      // *** Keep only Metropolitan Statistical Areas ***
+      // if (type === "metro" && properties.LSAD !== "M1") continue;
 
       const name = getName(properties)?.toString().toLowerCase().trim();
       if (!name) continue;
@@ -248,8 +266,11 @@ export async function buildRegionDatabase() {
             name: stateNameForAbbreviation[row.name.toUpperCase()],
             type,
           });
+        }
 
-          // Add simplified geometry for the states to draw boundaries and do queries
+        if (addPolygons) {
+          // Add simplified polygons for some regions to draw boundaries and do queries, those with a lot of entries we
+          // leave as rects.
           const geojsonFeature: Feature<Geometry, GeoJsonProperties> = {
             type: "Feature",
             properties: {},
@@ -262,13 +283,9 @@ export async function buildRegionDatabase() {
           });
 
           db.prepare(
-            `INSERT INTO state_regions (region_id, polygon_geojson)
+            `INSERT INTO polygon_regions (region_id, polygon_geojson)
              VALUES (?, ?)`
-          ).run(
-            row.id,
-            row.name.toUpperCase(),
-            JSON.stringify(simplified.geometry)
-          );
+          ).run(row.id, JSON.stringify(simplified.geometry));
         }
         id++;
       }

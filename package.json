@@ -1,6 +1,6 @@
 {
   "name": "us-region-db",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Creates sqlite and json files of US regions",
   "main": "index.js",
   "scripts": {
