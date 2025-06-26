@@ -5,10 +5,65 @@ import path from "path";
 import https from "https";
 import { createWriteStream, existsSync, createReadStream } from "fs";
 import unzipper from "unzipper";
-import { gzip } from "zlib";
+import simplify from "@turf/simplify";
 import { promisify } from "util";
+import { gzip } from "zlib";
+import type { Feature, Geometry, GeoJsonProperties } from "geojson";
 
 const censusBaseUrl = "https://www2.census.gov/geo/tiger/GENZ2020/shp/";
+
+export const stateNameForAbbreviation: Record<string, string> = {
+  AL: "Alabama",
+  AK: "Alaska",
+  AZ: "Arizona",
+  AR: "Arkansas",
+  CA: "California",
+  CO: "Colorado",
+  CT: "Connecticut",
+  DE: "Delaware",
+  FL: "Florida",
+  GA: "Georgia",
+  HI: "Hawaii",
+  ID: "Idaho",
+  IL: "Illinois",
+  IN: "Indiana",
+  IA: "Iowa",
+  KS: "Kansas",
+  KY: "Kentucky",
+  LA: "Louisiana",
+  ME: "Maine",
+  MD: "Maryland",
+  MA: "Massachusetts",
+  MI: "Michigan",
+  MN: "Minnesota",
+  MS: "Mississippi",
+  MO: "Missouri",
+  MT: "Montana",
+  NE: "Nebraska",
+  NV: "Nevada",
+  NH: "New Hampshire",
+  NJ: "New Jersey",
+  NM: "New Mexico",
+  NY: "New York",
+  NC: "North Carolina",
+  ND: "North Dakota",
+  OH: "Ohio",
+  OK: "Oklahoma",
+  OR: "Oregon",
+  PA: "Pennsylvania",
+  RI: "Rhode Island",
+  SC: "South Carolina",
+  SD: "South Dakota",
+  TN: "Tennessee",
+  TX: "Texas",
+  UT: "Utah",
+  VT: "Vermont",
+  VA: "Virginia",
+  WA: "Washington",
+  WV: "West Virginia",
+  WI: "Wisconsin",
+  WY: "Wyoming",
+};
 
 const shapefiles = [
   {
@@ -91,6 +146,13 @@ export async function buildRegionDatabase() {
       ymax REAL NOT NULL
     );
     CREATE INDEX idx_region_name ON region_bounds(name);
+
+    DROP TABLE IF EXISTS state_regions;
+    CREATE TABLE state_regions (
+      region_id INTEGER PRIMARY KEY,
+      polygon_geojson TEXT NOT NULL,
+      FOREIGN KEY(region_id) REFERENCES region_bounds(id)
+    );
   `);
 
   const insert = db.prepare(
@@ -178,6 +240,36 @@ export async function buildRegionDatabase() {
           row.ymax
         );
         fuseIndex.push({ id: row.id, name: row.name, type });
+
+        if (type === "state") {
+          // Add the full name of the state for fuzzy matching
+          fuseIndex.push({
+            id: row.id,
+            name: stateNameForAbbreviation[row.name.toUpperCase()],
+            type,
+          });
+
+          // Add simplified geometry for the states to draw boundaries and do queries
+          const geojsonFeature: Feature<Geometry, GeoJsonProperties> = {
+            type: "Feature",
+            properties: {},
+            geometry,
+          };
+
+          const simplified = simplify(geojsonFeature, {
+            tolerance: 0.01, // tweak based on desired smoothing
+            highQuality: false,
+          });
+
+          db.prepare(
+            `INSERT INTO state_regions (region_id, polygon_geojson)
+             VALUES (?, ?)`
+          ).run(
+            row.id,
+            row.name.toUpperCase(),
+            JSON.stringify(simplified.geometry)
+          );
+        }
         id++;
       }
     }
